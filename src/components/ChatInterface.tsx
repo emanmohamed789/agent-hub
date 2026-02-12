@@ -266,7 +266,7 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
       // 🟢 TEXT → /ask
       // ===============================
       else {
-        response = await fetch(`${baseUrl}/ask`, {
+        response = await fetch(`${baseUrl}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ question: text }),
