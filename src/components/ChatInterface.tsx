@@ -119,85 +119,185 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
   //   }, 1500);
   // };
 
+  // const sendMessage = async (
+  //   content?: string,
+  //   mediaType?: string,
+  //   mediaUrl?: string,
+  //   fileName?: string
+  // ) => {
+  //   if (!sessionId || !user) {
+  //     console.log("❌ Missing session or user");
+  //     return;
+  //   }
+
+  //   const text = content || input.trim();
+  //   if (!text && !mediaUrl) {
+  //     console.log("❌ Nothing to send");
+  //     return;
+  //   }
+
+  //   setIsLoading(true);
+
+  //   try {
+  //     console.log("🔍 Fetching agent endpoint...");
+
+  //     // 1️⃣ Get agent endpoint from DB
+  //     const { data: agent, error: agentError } = await supabase
+  //       .from("agents")
+  //       .select("endpoint")
+  //       .eq("id", agentId)
+  //       .single();
+
+  //     if (agentError || !agent?.endpoint) {
+  //       console.error("❌ Agent endpoint not found:", agentError);
+  //       return;
+  //     }
+
+  //     console.log("✅ Agent endpoint:", agent.endpoint);
+
+  //     const payload = {
+  //       sessionId,
+  //       agentId,
+  //       userId: user.id,
+  //       message: text || null,
+  //       mediaType: mediaType || "text",
+  //       mediaUrl: mediaUrl || null,
+  //       fileName: fileName || null,
+  //     };
+
+  //     console.log("📦 Sending payload:", payload);
+  //     console.log("🚀 Calling endpoint:", agent.endpoint);
+
+  //     // 2️⃣ Call dynamic agent endpoint
+  //     const response = await fetch(agent.endpoint, {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify(payload),
+  //     });
+
+  //     console.log("📡 Response status:", response.status);
+
+  //     const data = await response.json();
+
+  //     console.log("📨 Response data:", data);
+
+  //     if (!response.ok) {
+  //       console.error("❌ Endpoint error:", data);
+  //       return;
+  //     }
+
+  //     // 3️⃣ Update UI
+  //     setMessages((prev) => [...prev, data.userMessage, data.assistantMessage]);
+
+  //     setInput("");
+  //     console.log("✅ UI updated");
+  //   } catch (error) {
+  //     console.error("🔥 Frontend error:", error);
+  //   } finally {
+  //     setIsLoading(false);
+  //     console.log("⏹ Loading finished");
+  //   }
+  // };
   const sendMessage = async (
     content?: string,
     mediaType?: string,
     mediaUrl?: string,
     fileName?: string
   ) => {
-    if (!sessionId || !user) {
-      console.log("❌ Missing session or user");
-      return;
-    }
+    if (!sessionId || !user) return;
 
     const text = content || input.trim();
-    if (!text && !mediaUrl) {
-      console.log("❌ Nothing to send");
-      return;
-    }
+    if (!text && !mediaUrl) return;
 
+    // 1️⃣ Save USER message locally (DB)
+    const { data: userMsg } = await supabase
+      .from("messages")
+      .insert({
+        session_id: sessionId,
+        role: "user",
+        content: text || null,
+        media_type: mediaType || "text",
+        media_url: mediaUrl || null,
+        file_name: fileName || null,
+      })
+      .select()
+      .single();
+
+    if (userMsg) setMessages((prev) => [...prev, userMsg as ChatMsg]);
+    setInput("");
     setIsLoading(true);
 
     try {
-      console.log("🔍 Fetching agent endpoint...");
-
-      // 1️⃣ Get agent endpoint from DB
-      const { data: agent, error: agentError } = await supabase
+      // 2️⃣ Get agent endpoint
+      const { data: agent } = await supabase
         .from("agents")
         .select("endpoint")
         .eq("id", agentId)
         .single();
 
-      if (agentError || !agent?.endpoint) {
-        console.error("❌ Agent endpoint not found:", agentError);
-        return;
+      if (!agent?.endpoint) return;
+
+      const baseUrl = agent.endpoint.replace(/\/$/, "");
+
+      let response: Response;
+      let result: any;
+
+      // ===============================
+      // 🟢 FILE / IMAGE / VOICE → /upload
+      // ===============================
+      if (mediaUrl && fileName) {
+        const fileResponse = await fetch(mediaUrl);
+        const blob = await fileResponse.blob();
+
+        const formData = new FormData();
+        formData.append("file", new File([blob], fileName));
+
+        response = await fetch(`${baseUrl}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+
+        result = await response.json();
       }
 
-      console.log("✅ Agent endpoint:", agent.endpoint);
+      // ===============================
+      // 🟢 TEXT → /ask
+      // ===============================
+      else {
+        response = await fetch(`${baseUrl}/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: text }),
+        });
 
-      const payload = {
-        sessionId,
-        agentId,
-        userId: user.id,
-        message: text || null,
-        mediaType: mediaType || "text",
-        mediaUrl: mediaUrl || null,
-        fileName: fileName || null,
-      };
-
-      console.log("📦 Sending payload:", payload);
-      console.log("🚀 Calling endpoint:", agent.endpoint);
-
-      // 2️⃣ Call dynamic agent endpoint
-      const response = await fetch(agent.endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      console.log("📡 Response status:", response.status);
-
-      const data = await response.json();
-
-      console.log("📨 Response data:", data);
-
-      if (!response.ok) {
-        console.error("❌ Endpoint error:", data);
-        return;
+        result = await response.json();
       }
 
-      // 3️⃣ Update UI
-      setMessages((prev) => [...prev, data.userMessage, data.assistantMessage]);
+      if (!response.ok) throw new Error("Agent error");
 
-      setInput("");
-      console.log("✅ UI updated");
-    } catch (error) {
-      console.error("🔥 Frontend error:", error);
+      // 3️⃣ Save ASSISTANT message
+      const { data: assistantMsg } = await supabase
+        .from("messages")
+        .insert({
+          session_id: sessionId,
+          role: "assistant",
+          content: result.answer || JSON.stringify(result),
+          media_type: "text",
+          media_url: null,
+          file_name: null,
+        })
+        .select()
+        .single();
+
+      if (assistantMsg) {
+        setMessages((prev) => [...prev, assistantMsg as ChatMsg]);
+      }
+    } catch (e) {
+      console.error("Agent call failed", e);
     } finally {
       setIsLoading(false);
-      console.log("⏹ Loading finished");
     }
   };
 
@@ -323,8 +423,8 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
                 </div>
               )}
               <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-md"
-                  : "glass rounded-bl-md text-foreground"
+                ? "bg-primary text-primary-foreground rounded-br-md"
+                : "glass rounded-bl-md text-foreground"
                 }`}>
                 {renderMediaContent(msg)}
               </div>
