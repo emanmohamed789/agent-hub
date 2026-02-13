@@ -15,6 +15,9 @@ interface ChatMsg {
   created_at: string;
 }
 
+// Flask backend configuration
+const FLASK_API_URL = "http://127.0.0.1:5000";
+
 export function ChatInterface({ agentId, agentName }: { agentId: string; agentName: string }) {
   const { t } = useI18n();
   const { user } = useAuth();
@@ -81,125 +84,7 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
     return { url: data.publicUrl, fileName: file.name };
   };
 
-  // const sendMessage = async (content?: string, mediaType?: string, mediaUrl?: string, fileName?: string) => {
-  //   if (!sessionId || !user) return;
-  //   const text = content || input.trim();
-  //   if (!text && !mediaUrl) return;
-
-  //   const userMsg: any = {
-  //     session_id: sessionId,
-  //     role: "user",
-  //     content: text || null,
-  //     media_type: mediaType || "text",
-  //     media_url: mediaUrl || null,
-  //     file_name: fileName || null,
-  //   };
-
-  //   const { data } = await supabase.from("messages").insert(userMsg).select().single();
-  //   if (data) setMessages((prev) => [...prev, data as ChatMsg]);
-  //   setInput("");
-  //   setIsLoading(true);
-
-  //   // Update session timestamp
-  //   await supabase.from("chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", sessionId);
-
-  //   // Simulated response
-  //   setTimeout(async () => {
-  //     const assistantMsg = {
-  //       session_id: sessionId,
-  //       role: "assistant" as const,
-  //       content: t("chat.simulated", { query: text || fileName || "media" }),
-  //       media_type: "text",
-  //       media_url: null,
-  //       file_name: null,
-  //     };
-  //     const { data: aData } = await supabase.from("messages").insert(assistantMsg).select().single();
-  //     if (aData) setMessages((prev) => [...prev, aData as ChatMsg]);
-  //     setIsLoading(false);
-  //   }, 1500);
-  // };
-
-  // const sendMessage = async (
-  //   content?: string,
-  //   mediaType?: string,
-  //   mediaUrl?: string,
-  //   fileName?: string
-  // ) => {
-  //   if (!sessionId || !user) {
-  //     console.log("❌ Missing session or user");
-  //     return;
-  //   }
-
-  //   const text = content || input.trim();
-  //   if (!text && !mediaUrl) {
-  //     console.log("❌ Nothing to send");
-  //     return;
-  //   }
-
-  //   setIsLoading(true);
-
-  //   try {
-  //     console.log("🔍 Fetching agent endpoint...");
-
-  //     // 1️⃣ Get agent endpoint from DB
-  //     const { data: agent, error: agentError } = await supabase
-  //       .from("agents")
-  //       .select("endpoint")
-  //       .eq("id", agentId)
-  //       .single();
-
-  //     if (agentError || !agent?.endpoint) {
-  //       console.error("❌ Agent endpoint not found:", agentError);
-  //       return;
-  //     }
-
-  //     console.log("✅ Agent endpoint:", agent.endpoint);
-
-  //     const payload = {
-  //       sessionId,
-  //       agentId,
-  //       userId: user.id,
-  //       message: text || null,
-  //       mediaType: mediaType || "text",
-  //       mediaUrl: mediaUrl || null,
-  //       fileName: fileName || null,
-  //     };
-
-  //     console.log("📦 Sending payload:", payload);
-  //     console.log("🚀 Calling endpoint:", agent.endpoint);
-
-  //     // 2️⃣ Call dynamic agent endpoint
-  //     const response = await fetch(agent.endpoint, {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //       },
-  //       body: JSON.stringify(payload),
-  //     });
-
-  //     console.log("📡 Response status:", response.status);
-
-  //     const data = await response.json();
-
-  //     console.log("📨 Response data:", data);
-
-  //     if (!response.ok) {
-  //       console.error("❌ Endpoint error:", data);
-  //       return;
-  //     }
-
-  //     // 3️⃣ Update UI
-  //     setMessages((prev) => [...prev, data.userMessage, data.assistantMessage]);
-
-  //     setInput("");
-  //     console.log("✅ UI updated");
-  //   } catch (error) {
-  //     console.error("🔥 Frontend error:", error);
-  //   } finally {
-  //     setIsLoading(false);
-  //     console.log("⏹ Loading finished");
-  //   }
-  // };
+  // Send message to Flask backend
   const sendMessage = async (
     content?: string,
     mediaType?: string,
@@ -230,52 +115,56 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
     setIsLoading(true);
 
     try {
-      // 2️⃣ Get agent endpoint
-      const { data: agent } = await supabase
-        .from("agents")
-        .select("endpoint")
-        .eq("id", agentId)
-        .single();
-
-      if (!agent?.endpoint) return;
-
-      const baseUrl = agent.endpoint.replace(/\/$/, "");
-
-      let response: Response;
-      let result: any;
+      let result;
+      let response;
 
       // ===============================
-      // 🟢 FILE / IMAGE / VOICE → /upload
+      // 🟢 TEXT MESSAGE → Flask /ask endpoint
       // ===============================
-      if (mediaUrl && fileName) {
-        const fileResponse = await fetch(mediaUrl);
-        const blob = await fileResponse.blob();
-
-        const formData = new FormData();
-        formData.append("file", new File([blob], fileName));
-
-        response = await fetch(`${baseUrl}/upload`, {
+      if (mediaType === "text" || (!mediaUrl && text)) {
+        console.log("📤 Sending text to Flask:", text);
+        
+        response = await fetch(`${FLASK_API_URL}/ask`, {
           method: "POST",
-          body: formData,
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ 
+            question: text,
+            context: `Agent: ${agentName}, Session: ${sessionId}`
+          }),
+        });
+
+        result = await response.json();
+        console.log("📥 Flask response:", result);
+      }
+
+      // ===============================
+      // 🟢 IMAGE / FILE / VOICE → Upload to Supabase, then send text
+      // ===============================
+      else if (mediaUrl && fileName) {
+        // For media files, send a message about the file to Flask
+        const message = `[${mediaType}] Uploaded: ${fileName}. ${text || ''}`;
+        
+        response = await fetch(`${FLASK_API_URL}/ask`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ 
+            question: message,
+            context: `Agent: ${agentName}, Session: ${sessionId}, Media URL: ${mediaUrl}`
+          }),
         });
 
         result = await response.json();
       }
 
-      // ===============================
-      // 🟢 TEXT → /ask
-      // ===============================
-      else {
-        response = await fetch(`${baseUrl}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: text }),
-        });
-
-        result = await response.json();
+      if (!response || !response.ok) {
+        throw new Error(result?.detail || "Failed to get response from AI");
       }
-
-      if (!response.ok) throw new Error("Agent error");
 
       // 3️⃣ Save ASSISTANT message
       const { data: assistantMsg } = await supabase
@@ -283,7 +172,7 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
         .insert({
           session_id: sessionId,
           role: "assistant",
-          content: result.answer || JSON.stringify(result),
+          content: result.answer || "I received your message but couldn't generate a response.",
           media_type: "text",
           media_url: null,
           file_name: null,
@@ -294,8 +183,33 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
       if (assistantMsg) {
         setMessages((prev) => [...prev, assistantMsg as ChatMsg]);
       }
-    } catch (e) {
-      console.error("Agent call failed", e);
+
+      // Update session timestamp
+      await supabase
+        .from("chat_sessions")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", sessionId);
+
+    } catch (error) {
+      console.error("❌ Agent call failed:", error);
+      
+      // Save error message to chat
+      const { data: errorMsg } = await supabase
+        .from("messages")
+        .insert({
+          session_id: sessionId,
+          role: "assistant",
+          content: "Sorry, I encountered an error. Please check if the Flask server is running at http://127.0.0.1:5000",
+          media_type: "text",
+          media_url: null,
+          file_name: null,
+        })
+        .select()
+        .single();
+
+      if (errorMsg) {
+        setMessages((prev) => [...prev, errorMsg as ChatMsg]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -398,14 +312,39 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
     return <p>{msg.content}</p>;
   };
 
+  // Health check function
+  const checkFlaskServer = async () => {
+    try {
+      const response = await fetch(`${FLASK_API_URL}/health`);
+      const data = await response.json();
+      console.log("✅ Flask server status:", data);
+      return true;
+    } catch (error) {
+      console.error("❌ Flask server not reachable:", error);
+      return false;
+    }
+  };
+
+  // Check server on mount
+  useEffect(() => {
+    checkFlaskServer();
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
+      {/* Server Status Indicator (optional) */}
+      <div className="absolute top-2 right-4 flex items-center gap-2">
+        <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+        <span className="text-xs text-muted-foreground">Flask AI</span>
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {messages.length === 0 && !isLoading && (
           <div className="text-center py-12 text-muted-foreground">
             <Bot className="h-12 w-12 mx-auto mb-3 text-primary/30" />
             <p className="text-sm">{t("chat.welcome", { name: agentName })}</p>
+            <p className="text-xs mt-2">Connected to Flask AI backend</p>
           </div>
         )}
         <AnimatePresence initial={false}>
@@ -422,10 +361,11 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
                   <Bot className="h-4 w-4" />
                 </div>
               )}
-              <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user"
-                ? "bg-primary text-primary-foreground rounded-br-md"
-                : "glass rounded-bl-md text-foreground"
-                }`}>
+              <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-primary text-primary-foreground rounded-br-md"
+                  : "glass rounded-bl-md text-foreground"
+              }`}>
                 {renderMediaContent(msg)}
               </div>
               {msg.role === "user" && (
@@ -467,19 +407,46 @@ export function ChatInterface({ agentId, agentName }: { agentId: string; agentNa
         <div className="flex gap-2 items-end">
           {/* Media buttons */}
           <div className="flex gap-1">
-            <button onClick={() => imageInputRef.current?.click()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors" title={t("chat.uploadImage")}>
+            <button 
+              onClick={() => imageInputRef.current?.click()} 
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors" 
+              title={t("chat.uploadImage")}
+            >
               <Image className="h-4 w-4" />
             </button>
-            <button onClick={() => fileInputRef.current?.click()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors" title={t("chat.uploadFile")}>
+            <button 
+              onClick={() => fileInputRef.current?.click()} 
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors" 
+              title={t("chat.uploadFile")}
+            >
               <Paperclip className="h-4 w-4" />
             </button>
-            <button onClick={toggleRecording} className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${isRecording ? "bg-destructive text-destructive-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`} title={t("chat.voiceRecord")}>
+            <button 
+              onClick={toggleRecording} 
+              className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+                isRecording 
+                  ? "bg-destructive text-destructive-foreground" 
+                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              }`} 
+              title={t("chat.voiceRecord")}
+            >
               {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </button>
           </div>
 
-          <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-          <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
+          <input 
+            ref={imageInputRef} 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={handleImageUpload} 
+          />
+          <input 
+            ref={fileInputRef} 
+            type="file" 
+            className="hidden" 
+            onChange={handleFileUpload} 
+          />
 
           <input
             type="text"
